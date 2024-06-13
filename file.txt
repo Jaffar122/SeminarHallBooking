@@ -1,0 +1,188 @@
+Commands that be used in terminal for firebase 
+npx expo install @react-native-firebase/app
+npx expo install @react-native-firebase/auth @react-native-firebase/crashlytics
+import { initializeApp } from '@firebase/app';
+import { initializeAuth, getReactNativePersistence, onAuthStateChanged } from '@firebase/auth';
+import React, { useEffect, useState } from 'react';
+import AppNavigator from './AppNavigator';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+
+const firebaseConfig = {
+  apiKey: "",
+  authDomain: "",
+  databaseURL: "",
+  projectId: "",
+  storageBucket: "",
+  messagingSenderId: "",
+  appId: "",
+  measurementId: "",
+};
+
+const App = () => {
+  // Initialize Firebase
+  const firebaseApp = initializeApp(firebaseConfig);
+  const [authInitialized, setAuthInitialized] = useState(false);
+
+  useEffect(() => {
+    const initializeFirebase = async () => {
+      // Initialize Auth
+      const auth = initializeAuth(firebaseApp, {
+        persistence: getReactNativePersistence(AsyncStorage),
+      });
+
+      // Check if auth is already initialized
+      if (!authInitialized) {
+        onAuthStateChanged(auth, (user) => {
+          // For simplicity, logging user status
+          console.log(user ? "User is logged in" : "User is not logged in");
+
+          // Mark auth as initialized
+          setAuthInitialized(true);
+        });
+      }
+    };
+
+    initializeFirebase();
+  }, [authInitialized, firebaseApp]);
+
+  return <AppNavigator />;
+};
+
+export default App;
+
+
+import React, { useState, useEffect } from "react";
+import { SafeAreaView, ScrollView, StyleSheet, View } from "react-native";
+import { List, FAB, Text } from "react-native-paper";
+import { useNavigation } from "@react-navigation/native";
+import { getAuth } from "firebase/auth";
+import { getDatabase, ref, onValue, update } from "firebase/database";
+
+const BookedTimeSlot = () => {
+  const navigation = useNavigation();
+  const auth = getAuth();
+  const db = getDatabase();
+  const [availabilityData, setAvailabilityData] = useState([]);
+
+  useEffect(() => {
+    const user = auth.currentUser;
+    const bookingsRef = ref(db, "bookings");
+
+    const handleBookingUpdate = (snapshot) => {
+      const bookings = snapshot.val();
+
+      if (bookings) {
+        const currentTime = new Date().getTime();
+
+        // Filter out expired bookings
+        const userBookings = Object.values(bookings).filter((booking) => {
+          const endTime = new Date(booking.endTime).getTime();
+          const isExpired = currentTime > endTime;
+
+          // Check both date and time before changing status
+          if (isExpired && booking.status !== "Completed") {
+            const currentDate = new Date();
+            const bookingEndDate = new Date(booking.endTime);
+
+            // Check if the current date is greater than or equal to the booking end date
+            if (currentDate >= bookingEndDate) {
+              // Update booking status if expired
+              update(ref(db, `bookings/${booking.bookingId}`), {
+                status: "Completed",
+              });
+            }
+          }
+
+          return !isExpired;
+        });
+
+        setAvailabilityData(userBookings);
+      }
+    };
+
+    // Set up the initial data and listen for changes
+    onValue(bookingsRef, handleBookingUpdate);
+
+    // Clean up the listener when the component unmounts
+    return () => {
+      // Stop listening for changes when the component unmounts
+      off(bookingsRef, "value", handleBookingUpdate);
+    };
+  }, [auth, db]);
+
+  const handleBookPress = () => {
+    navigation.navigate("Book");
+  };
+
+  return (
+    <SafeAreaView style={styles.container}>
+      <ScrollView>
+        {availabilityData.map((item, index) => (
+          <View key={index} style={styles.bookingContainer}>
+            <List.Item
+              titleStyle={styles.title}
+              descriptionStyle={styles.description}
+              right={() => (
+                <View style={styles.container}>
+                  <Text style={styles.time}>{item.time}</Text>
+                  <Text style={styles.booked}>
+                    {item.status === "Completed" ? "Completed" : "Booked"}
+                  </Text>
+                </View>
+              )}
+              title={`${item.eventName}`}
+              description={` ${item.date}\n ${item.bookedBy}`}
+            />
+          </View>
+        ))}
+      </ScrollView>
+
+      <FAB
+        style={styles.fab}
+        icon="plus"
+        onPress={handleBookPress}
+        label="For Booking"
+      />
+    </SafeAreaView>
+  );
+};
+
+const styles = StyleSheet.create({
+  container: {
+    flex: 1,
+    backgroundColor: "#e8ecf4",
+  },
+  bookingContainer: {
+    backgroundColor: "#fff",
+    marginVertical: 8,
+    padding: 12,
+    borderRadius: 12,
+  },
+  time: {
+    fontSize: 12,
+    color: "#555",
+    marginRight: 8,
+  },
+  fab: {
+    position: "absolute",
+    margin: 16,
+    right: 0,
+    bottom: 0,
+  },
+  booked: {
+    color: "#075eec",
+    marginTop: 4,
+  },
+
+  title: {
+    fontSize: 16,
+    fontWeight: "bold",
+    color: "#333",
+  },
+  description: {
+    fontSize: 14,
+    color: "#777",
+  },
+});
+
+export default BookedTimeSlot;
